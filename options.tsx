@@ -1,75 +1,85 @@
-/**
- *  OpenAI GPT-3 Text Generator (Chrome extension)
- *
- * (c) 2022 Mark Kretschmann <kretschmann@kde.org>
- *
- */
-import Button from "@mui/material/Button"
-import Divider from "@mui/material/Divider"
-import FormControl from "@mui/material/FormControl"
-import Input from "@mui/material/Input"
-import InputLabel from "@mui/material/InputLabel"
-import MenuItem from "@mui/material/MenuItem"
-import Select from "@mui/material/Select"
-import Slider from "@mui/material/Slider"
-import Stack from "@mui/material/Stack"
-import TextField from "@mui/material/TextField"
-import Typography from "@mui/material/Typography"
+import { useCallback } from "react"
+
+import {
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Slider,
+  Stack,
+  TextField,
+  Typography
+} from "@mui/material"
 
 import { useStorage } from "@plasmohq/storage/hook"
 
-function OptionsIndex() {
-  const [key, setKey] = useStorage("openai_key")
-  const [model, setModel] = useStorage("openai_model", async (v) =>
-    v === undefined ? "text-davinci-003" : v
+type OpenAIModel =
+  | "gpt-4o-mini"
+  | "gpt-4.1-mini"
+
+export default function OptionsIndex() {
+  const [apiKey, setApiKey] = useStorage<string>("openai_key", "")
+  const [model, setModel] = useStorage<OpenAIModel>(
+    "openai_model",
+    "gpt-4o-mini"
   )
-  const [maxTokens, setMaxTokens] = useStorage("openai_max_tokens", async (v) =>
-    v === undefined ? 256 : v
+  const [maxTokens, setMaxTokens] = useStorage<number>(
+    "openai_max_tokens",
+    512
   )
 
-  const handleMaxTokensChange = (event: any, newValue: number | number[]) => {
-    setMaxTokens(newValue as number)
-  }
+  const handleMaxTokensChange = useCallback(
+    (_: Event, value: number | number[]) => {
+      setMaxTokens(value as number)
+    },
+    [setMaxTokens]
+  )
 
   return (
-    <Stack maxWidth={600} spacing={2}>
-      <Typography variant="h5">OpenAI Extension Options</Typography>
+    <Stack maxWidth={600} spacing={3}>
+      <Typography variant="h5">
+        OpenAI Extension Options
+      </Typography>
+
+      <Divider />
 
       <TextField
-        label="OpenAI API key"
-        autoFocus
-        onChange={(e) => setKey(e.target.value)}
-        value={key}
+        label="OpenAI API Key"
+        type="password"
+        autoComplete="off"
+        value={apiKey}
+        onChange={(e) => setApiKey(e.target.value.trim())}
+        helperText="Stored locally in browser storage"
+        fullWidth
       />
-      <FormControl>
+
+      <FormControl fullWidth>
         <InputLabel id="model-select-label">Model</InputLabel>
         <Select
           labelId="model-select-label"
           label="Model"
           value={model}
-          onChange={(e) => setModel(e.target.value)}>
-          <MenuItem value="code-davinci-002">code-davinci-002</MenuItem>
-          <MenuItem value="text-curie-001">text-curie-001</MenuItem>
-          <MenuItem value="text-davinci-001">text-davinci-001</MenuItem>
-          <MenuItem value="text-davinci-002">text-davinci-002</MenuItem>
-          <MenuItem value="text-davinci-003">text-davinci-003</MenuItem>
+          onChange={(e) => setModel(e.target.value as OpenAIModel)}
+        >
+          <MenuItem value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</MenuItem>
+          <MenuItem value="gpt-4.1-mini">gpt-4.1-mini (better reasoning)</MenuItem>
         </Select>
       </FormControl>
-      <Stack direction="row" spacing={2} justifyContent="flex-start">
-        <Typography variant="subtitle2">Max_Tokens:</Typography>
+
+      <Stack spacing={1}>
+        <Typography variant="subtitle2">
+          Max tokens: {maxTokens}
+        </Typography>
         <Slider
-          size="small"
-          step={32}
-          min={64}
-          max={512}
-          marks
-          valueLabelDisplay="auto"
+          step={64}
+          min={128}
+          max={4096}
           value={maxTokens}
           onChange={handleMaxTokensChange}
+          valueLabelDisplay="auto"
         />
       </Stack>
     </Stack>
   )
 }
-
-export default OptionsIndex
