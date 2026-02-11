@@ -1,156 +1,123 @@
-/**
- *  OpenAI GPT-3 Text Generator (Chrome extension)
- *
- * (c) 2022 Mark Kretschmann <kretschmann@kde.org>
- *
- */
+import { useEffect, useState } from "react"
 import DeleteIcon from "@mui/icons-material/Delete"
 import HistoryIcon from "@mui/icons-material/History"
 import SettingsIcon from "@mui/icons-material/Settings"
-import Box from "@mui/material/Box"
-import Button from "@mui/material/Button"
-import Divider from "@mui/material/Divider"
-import IconButton from "@mui/material/IconButton"
-import List from "@mui/material/List"
-import ListItemButton from "@mui/material/ListItemButton"
-import ListItemText from "@mui/material/ListItemText"
-import Modal from "@mui/material/Modal"
-import Slider from "@mui/material/Slider"
-import Stack from "@mui/material/Stack"
-import TextField from "@mui/material/TextField"
-import Tooltip from "@mui/material/Tooltip"
-import Typography from "@mui/material/Typography"
-import { useState } from "react"
-
+import {
+  Box,
+  Button,
+  Divider,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemText,
+  Modal,
+  Slider,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography
+} from "@mui/material"
 import { useStorage } from "@plasmohq/storage/hook"
 
 let selection = ""
 
-/**
- * Returns the selected text.
- * Note: This is executed in the context of the active tab.
- * @return {string} The selected text
- */
+// Get selected text in active tab
 function getTextSelection(): string {
-  return window.getSelection().toString()
+  return window.getSelection()?.toString() ?? ""
 }
 
-function IndexPopup(): JSX.Element {
+export default function IndexPopup(): JSX.Element {
   const [openHistory, setOpenHistory] = useState(false)
   const [prompt, setPrompt] = useState("")
   const [buttonText, setButtonText] = useState("Generate (Ctrl+Enter)")
   const [result, setResult] = useState("")
   const [error, setError] = useState("")
 
-  const [temperature, setTemperature] = useStorage(
-    "openai_temperature",
-    async (v) => (v === undefined ? 0.0 : v)
+  const [temperature, setTemperature] = useStorage("openai_temperature", async (v) =>
+    v === undefined ? 0.0 : v
   )
-  const [history, setHistory] = useStorage("openai_history", async (v) =>
-    v === undefined ? [] : v
-  )
-  const [key, setKey] = useStorage("openai_key")
-  const [maxTokens, setMaxTokens] = useStorage("openai_max_tokens")
-  const [model, setModel] = useStorage("openai_model")
+  const [history, setHistory] = useStorage("openai_history", async (v) => (v ?? []))
+  const [key] = useStorage("openai_key")
+  const [maxTokens] = useStorage("openai_max_tokens", async (v) => v ?? 150)
+  const [model] = useStorage("openai_model", async (v) => v ?? "text-davinci-003")
 
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    const activeTab = tabs[0]
-
-    chrome.scripting.executeScript(
-      {
-        target: { tabId: activeTab.id, allFrames: true },
-        func: getTextSelection
-      },
-      (injectionResults) => {
-        for (let result of injectionResults) {
-          if (
-            result.result !== "" &&
-            result.result !== undefined &&
-            result.result !== selection
-          ) {
-            selection = result.result as string
-            console.log("Selected text: " + selection)
-            setPrompt("{SELECTION}")
+  // Get selection from active tab once
+  useEffect(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0]
+      if (!tab?.id) return
+      chrome.scripting.executeScript(
+        { target: { tabId: tab.id, allFrames: true }, func: getTextSelection },
+        (injectionResults) => {
+          for (const r of injectionResults) {
+            if (r.result && r.result !== selection) {
+              selection = r.result as string
+              setPrompt("{SELECTION}")
+            }
           }
         }
-      }
-    )
-  })
+      )
+    })
+  }, [])
 
-  // Generate a prompt using OpenAI's GPT-3 API
-  async function createCompletion() {
+  // Generate prompt using OpenAI API
+  const createCompletion = async () => {
+    if (!key) {
+      setError("API key not set in options!")
+      return
+    }
+
     const params = {
       prompt: prompt.replaceAll("{SELECTION}", selection),
-      temperature: temperature,
+      temperature,
       max_tokens: maxTokens,
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
-      model: model
-    }
-    const requestOptions = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + key
-      },
-      body: JSON.stringify(params)
+      model
     }
 
-    const oldButtonText = buttonText
     setButtonText("Generating...")
-    const response = await fetch(
-      "https://api.openai.com/v1/completions",
-      requestOptions
-    )
-    setButtonText(oldButtonText)
 
-    const responseJson = await response.json()
-    // Check for errors
-    if (responseJson.error) {
-      setError(responseJson.error)
-      return
+    try {
+      const res = await fetch("https://api.openai.com/v1/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify(params)
+      })
+
+      const data = await res.json()
+
+      if (data.error) {
+        setError(data.error.message ?? "Unknown API error")
+        setButtonText("Generate (Ctrl+Enter)")
+        return
+      }
+
+      const filteredText = (data.choices?.[0]?.text ?? "")
+        .split(/\r?\n/)
+        .filter((line: string) => line.trim())
+        .join("\n")
+
+      setResult(filteredText)
+
+      const newHistory = [filteredText, ...history]
+      setHistory(newHistory)
+    } catch (err: any) {
+      setError(err.message ?? "Failed to generate text")
+    } finally {
+      setButtonText("Generate (Ctrl+Enter)")
     }
-
-    const filteredText = responseJson.choices[0].text
-      .split(/\r?\n/) // Split input text into an array of lines
-      .filter((line) => line.trim() !== "") // Filter out lines that are empty or contain only whitespace
-      .join("\n") // Join line array into a string
-
-    setResult(filteredText)
-
-    // Add to history
-    const newHistory = [filteredText, ...history]
-    setHistory(newHistory)
   }
 
-  /**
-   * Evaluate code in sandboxed iframe.
-   * @param {string} code The code to evaluate
-   */
-  function evalInSandbox(code: string): void {
-    const iframe = document.getElementById("sandbox") as HTMLIFrameElement
-    window.addEventListener("message", (event) => {
-      console.log("EVAL output: " + event.data)
-    })
-    iframe.contentWindow.postMessage(code, "*")
-  }
-
-  const handleTemperatureChange = (
-    event: Event,
-    newValue: number | number[]
-  ) => {
-    setTemperature(newValue as number)
+  const handleTemperatureChange = (_: Event, value: number | number[]) => {
+    setTemperature(value as number)
   }
 
   return (
-    <Stack
-      direction="column"
-      minWidth={550}
-      spacing={2}
-      justifyContent="flex-start">
+    <Stack direction="column" minWidth={550} spacing={2}>
       {/* Error modal */}
-      <Modal open={error !== ""} onClose={() => setError("")}>
+      <Modal open={!!error} onClose={() => setError("")}>
         <Box
           sx={{
             position: "absolute",
@@ -163,14 +130,13 @@ function IndexPopup(): JSX.Element {
             boxShadow: 24,
             p: 4
           }}>
-          <Typography id="modal-modal-title" variant="h6" component="h2">
-            Error: Please check your API key
-          </Typography>
+          <Typography variant="h6">Error</Typography>
+          <Typography>{error}</Typography>
         </Box>
       </Modal>
 
-      {/* History modal with vertical scrolling and clickable items */}
-      <Modal open={openHistory}>
+      {/* History modal */}
+      <Modal open={openHistory} onClose={() => setOpenHistory(false)}>
         <Box
           sx={{
             position: "absolute",
@@ -184,28 +150,25 @@ function IndexPopup(): JSX.Element {
             p: 4
           }}>
           <Stack direction="row" justifyContent="space-between">
-            <Typography id="modal-modal-title" variant="h6" component="h2">
-              History
-            </Typography>
-            <IconButton onClick={setHistory.bind(null, [])}>
+            <Typography variant="h6">History</Typography>
+            <IconButton onClick={() => setHistory([])}>
               <Tooltip title="Clear history">
                 <DeleteIcon />
               </Tooltip>
             </IconButton>
           </Stack>
           <Divider />
-          <Box sx={{ overflowY: "scroll", height: 400 }}>
+          <Box sx={{ overflowY: "auto", height: 400 }}>
             <List>
-              {history && history.length > 0 ? ( // If history exists and is not empty
+              {history.length ? (
                 history.map((item, index) => (
-                  // If item is clicked copy item to prompt and close the modal
                   <ListItemButton
                     key={index}
                     onClick={() => {
                       setPrompt(item)
                       setOpenHistory(false)
                     }}>
-                    <ListItemText primary={index + 1 + ". " + item} />
+                    <ListItemText primary={`${index + 1}. ${item}`} />
                   </ListItemButton>
                 ))
               ) : (
@@ -220,62 +183,48 @@ function IndexPopup(): JSX.Element {
 
       <Stack direction="row" justifyContent="space-between">
         <Typography variant="h5">AI Companion</Typography>
-
         <Stack direction="row" spacing={1}>
-          {/* History button */}
-          <IconButton onClick={() => setOpenHistory(true)}>
-            <Tooltip title="History">
+          <Tooltip title="History">
+            <IconButton onClick={() => setOpenHistory(true)}>
               <HistoryIcon />
-            </Tooltip>
-          </IconButton>
-
-          {/* Settings button */}
-          <IconButton onClick={() => chrome.runtime.openOptionsPage()}>
-            <Tooltip title="Settings">
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Settings">
+            <IconButton onClick={() => chrome.runtime.openOptionsPage()}>
               <SettingsIcon />
-            </Tooltip>
-          </IconButton>
+            </IconButton>
+          </Tooltip>
         </Stack>
       </Stack>
 
       <TextField
         label="Prompt"
         multiline
-        autoFocus
         minRows={2}
-        onChange={(e) => setPrompt(e.target.value)}
+        autoFocus
         value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={(e) => {
-          if (e.getModifierState("Control") && e.key === "Enter") {
-            createCompletion()
-          }
-          if (e.getModifierState("Control") && e.key === "c") {
-            navigator.clipboard.writeText(result) // Copy to clipboard
-          }
+          if (e.ctrlKey && e.key === "Enter") createCompletion()
+          if (e.ctrlKey && e.key === "c") navigator.clipboard.writeText(result)
         }}
       />
 
       <TextField
-        label={
-          selection === ""
-            ? "Selected Text (None)"
-            : "Selected Text {SELECTION}"
-        }
+        label={selection ? "Selected Text {SELECTION}" : "Selected Text (None)"}
         multiline
-        disabled
+        minRows={1}
         InputProps={{ readOnly: true }}
         value={selection}
-        minRows={1}
       />
 
-      <Stack direction="row" spacing={2} justifyContent="flex-start">
+      <Stack direction="row" spacing={2} alignItems="center">
         <Typography variant="subtitle2">Temperature:</Typography>
-
         <Slider
           size="small"
           step={0.1}
-          min={0.0}
-          max={1.0}
+          min={0}
+          max={1}
           marks
           valueLabelDisplay="auto"
           value={temperature}
@@ -290,19 +239,14 @@ function IndexPopup(): JSX.Element {
       <Divider />
 
       <TextField
-        label="Result (Ctrl+C➔Clipboard)"
+        label="Result (Ctrl+C → Clipboard)"
         multiline
+        minRows={7}
         InputProps={{ readOnly: true }}
         value={result}
-        minRows={7}
       />
 
-      <iframe
-        src="up_/sandbox.html"
-        id="sandbox"
-        style={{ display: "none" }}></iframe>
+      <iframe src="up_/sandbox.html" id="sandbox" style={{ display: "none" }} />
     </Stack>
   )
 }
-
-export default IndexPopup
